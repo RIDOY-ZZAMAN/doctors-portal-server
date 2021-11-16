@@ -2,9 +2,13 @@ const express = require('express')
 const app = express();
 const cors = require('cors');
 const admin = require("firebase-admin");
+const ObjectId = require('mongodb').ObjectId;
+const fileUpload = require('express-fileupload');
 app.use(cors());
 app.use(express.json());
+app.use(fileUpload());
 require('dotenv').config();
+const stripe = require('stripe')(process.env.STRIPE_SECRET);
 
 const port = process.env.PORT || 5000;
 
@@ -44,7 +48,8 @@ async function run() {
         await client.connect();
         const database = client.db('doctors_portal');
         const appoinmentsCollection = database.collection('appoinments');
-        const usersCollection = database.collection('users')
+        const usersCollection = database.collection('users');
+        const doctorsCollection = database.collection('doctors')
         console.log("connected to database")
         app.get('/appoinments', verifyToken, async (req, res) => {
             const email = req.query.email;
@@ -112,13 +117,82 @@ async function run() {
                 res.status(403).json({ mesage: "You Do not have access to make admin" })
             }
 
+        })
 
+        app.get('/appoinmnets/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: ObjectId(id) };
+            const result = await appoinmentsCollection.findOne(query);
+            res.json(result)
 
+        })
+
+        app.post('/create-payment-intent', async (req, res) => {
+            const paymentInfo = req.body;
+            const amount = paymentInfo.price * 100;
+            const paymentIntent = await stripe.paymentIntents.create({
+                currency: "usd",
+                amount: amount,
+                payment_method_types: [
+                    "card",
+                ],
+
+            })
+            res.json({ clientSecret: paymentIntent.client_secret })
+
+        })
+
+        app.put('/appoinments/:id', async (req, res) => {
+            const id = req.params.id;
+            const payment = req.body;
+            const filter = { _id: ObjectId(id) }
+            const updateDoc = {
+                $set: {
+                    payment: payment
+                }
+
+            };
+
+            const result = await appoinmentsCollection.updateOne(filter, updateDoc);
+            res.json(result)
+
+        })
+
+        //ADD DOCTORS
+
+        app.post('/doctors', async (req, res) => {
+            const name = req.body.name;
+            const email = req.body.email;
+            const pic = req.files.image;
+            const picData = pic.data;
+            const encodedPic = picData.toString('base64');
+            const imageBuffer = Buffer.from(encodedPic, 'base64')
+            const doctor = {
+                name,
+                email,
+                image: imageBuffer
+            }
+            const result = await doctorsCollection.insertOne(doctor)
+            res.json(result)
+
+        })
+
+        //GET A DOCTOR
+
+        app.get('/doctors', async (req, res) => {
+            const cursor = doctorsCollection.find({});
+            const doctors = await cursor.toArray();
+            res.json(doctors)
 
         })
 
 
+
+
+
     }
+
+
 
     finally {
 
